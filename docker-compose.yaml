@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: data_pipeline_bot
+    # This automatically loads your secret token into the container securely
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    # If the bot crashes or the server restarts, Docker will turn it back on
+    restart: unless-stopped
