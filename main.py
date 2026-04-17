@@ -3,6 +3,9 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import logging
+import time
+import csv
+import os
 
 # Configure logging for containers (unbuffered output)
 logging.basicConfig(
@@ -53,7 +56,7 @@ async def on_ready():
     logger.info("----------------------------------------")
 @bot.event
 async def on_member_join(member):
-    await member.send(f"Hello Human, I'm your cutie piggy sniffy hedgehog MAEEEEEEEEEEEE, {member.mention}!")
+    await member.send(f"Hello Human, Welcome to fking Jedi Temple. May Mae be with u, {member.mention}!")
 
 @bot.event
 async def on_message(message):
@@ -66,16 +69,73 @@ async def on_message(message):
     
     await bot.process_commands(message)  # Ensure commands still work
 
+active_voice_sessions = {}
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # Ignore the bot itself so we don't track its own movements
+    logging.info(f"Voice state update for {member.name}: before={before.channel}, after={after.channel}")
+    if member.bot:
+        return
+    # log active_voice_sessions to see if it's working
+    logging.info(f"Current active voice sessions: {active_voice_sessions}")
+    # 1. User JOINS a voice channel (before.channel is None, after.channel has a value)
+    if before.channel is None and after.channel is not None:
+        active_voice_sessions[member.id] = time.time() # Record the exact start time
+        logger.info(f"🎤 {member.name} joined {after.channel.name}")
+
+    # 2. User LEAVES a voice channel (before.channel has a value, after.channel is None)
+    elif before.channel is not None and after.channel is None:
+        # Check if we have their join time recorded
+        logging.info("in elif")
+        if member.id in active_voice_sessions:
+            logging.info("found member")
+            join_time = active_voice_sessions.pop(member.id) # Remove them from active memory and get the time
+            leave_time = time.time()
+            duration_seconds = round(leave_time - join_time)
+
+            logger.info(f"🚪 {member.name} left {before.channel.name}. Stayed for {duration_seconds} seconds.")
+
+            # --- DATA ENGINEERING STEP 1: STORE THE RAW DATA ---
+            # We open a CSV file in 'a' (append) mode to add a new row
+            
+            file_name = 'voice_logs.csv'
+            file_exists = os.path.isfile(file_name)
+            
+            with open(file_name, mode='a', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                # If the file was just created, write the header row first
+                if not file_exists:
+                    writer.writerow(['user_id', 'username', 'channel_name', 'duration_seconds', 'timestamp'])
+                
+                # Write the actual data row
+                writer.writerow([member.id, member.name, before.channel.name, duration_seconds, int(leave_time)])
+
+
 # Command section
 # !hello
 @bot.command()
 async def hello(ctx):
     
     await ctx.send(f"Hello {ctx.author.mention}!")
+    
+    
+@bot.tree.command(name="ping", description="Replies with Pong and shows the bot's latency!")
+async def ping(interaction: discord.Interaction):
+    # Calculate latency in milliseconds
+    latency = round(bot.latency * 1000)
+    
+    # We must 'respond' to the interaction, otherwise Discord thinks the bot crashed!
+    await interaction.response.send_message(f"🏓 Pong! My latency is {latency}ms.")
+
+@bot.tree.command(name="test", description="A simple test command to check if the bot is working.")
+async def test(interaction: discord.Interaction):
+    await interaction.response.send_message("✅ Test successful! The bot is working fine.")
 
 # 5. EXECUTION: Start the bot using the token
 if __name__ == '__main__':
     if TOKEN is None:
         logging.info("❌ Error: DISCORD_TOKEN not found. Check your .env file!")
     else:
-        bot.run(TOKEN,log_handler=handler, log_level=logging.DEBUG)
+        #bot.run(TOKEN,log_handler=handler, log_level=logging.DEBUG)
+        bot.run(TOKEN,log_handler=handler)
