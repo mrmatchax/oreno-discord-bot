@@ -26,7 +26,6 @@ CREATE TABLE users (
     user_id       BIGINT      PRIMARY KEY,  -- Discord's own snowflake ID
     username      TEXT        NOT NULL,
     display_name  TEXT,
-    avatar_url    TEXT,
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -6,20 +6,18 @@ async def upsert_user(
     user_id: int,
     username: str,
     display_name: str = None,
-    avatar_url: str = None,
 ) -> None:
-    """Insert or update a Discord user. Overwrites username/display_name/avatar on conflict."""
+    """Insert or update a Discord user. Overwrites username/display_name on conflict."""
     await pool.execute(
         """
-        INSERT INTO users (user_id, username, display_name, avatar_url)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (user_id, username, display_name)
+        VALUES ($1, $2, $3)
         ON CONFLICT (user_id) DO UPDATE
             SET username     = EXCLUDED.username,
                 display_name = EXCLUDED.display_name,
-                avatar_url   = EXCLUDED.avatar_url,
                 updated_at   = NOW()
         """,
-        user_id, username, display_name, avatar_url,
+        user_id, username, display_name,
     )
 
 
