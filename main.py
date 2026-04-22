@@ -1,8 +1,10 @@
+import asyncio
 import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import logging
+from aiohttp import web
 
 from db.connection import create_pool, close_pool
 from db.queries.users import upsert_guild, upsert_user, upsert_guild_member
@@ -72,8 +74,26 @@ async def on_ready():
                 await upsert_guild_member(bot.pool, guild.id, member.id, member.joined_at, member.nick)
         logger.info(f"📋 Synced guild: {guild.name}")
 
-if __name__ == '__main__':
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def run_health_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health server running on port {port}")
+
+async def main():
     if TOKEN is None:
         logger.error("❌ DISCORD_TOKEN not found. Check your .env file!")
-    else:
-        bot.run(TOKEN, log_handler=handler)
+        return
+    await run_health_server()
+    async with bot:
+        await bot.start(TOKEN)
+
+if __name__ == '__main__':
+    asyncio.run(main())

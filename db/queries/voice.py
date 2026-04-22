@@ -1,4 +1,7 @@
 import asyncpg
+import logging
+
+logger = logging.getLogger("bot")
 
 
 async def open_session(
@@ -28,7 +31,7 @@ async def close_session(
     left_at,
 ) -> None:
     """Close the most recent open voice session and compute duration in seconds."""
-    await pool.execute(
+    result = await pool.execute(
         """
         UPDATE voice_sessions
         SET left_at          = $3,
@@ -39,3 +42,4 @@ async def close_session(
         """,
         user_id, guild_id, left_at,
     )
+    logger.info(f"close_session result: {result} | user_id={user_id} guild_id={guild_id} left_at={left_at}")
