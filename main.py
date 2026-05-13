@@ -1,49 +1,62 @@
+import asyncio
 import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import logging
+from aiohttp import web
 
-# Configure logging for containers (unbuffered output)
+from db.connection import create_pool, close_pool
+from db.queries.users import upsert_guild, upsert_user, upsert_guild_member
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]  # Writes to stderr (not buffered)
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger("bot")
-
-# Config handler
 handler = logging.FileHandler('discord.log', encoding='utf-8', mode='w')
 
-# 1. SECURITY: Load the secret token from the .env file
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-# 2. PERMISSIONS (Intents): Tell Discord what data we want to see
 intents = discord.Intents.default()
-intents.message_content = True  # Allows bot to read chat messages
-intents.members = True          # Allows bot to see who is in the server
-intents.voice_states = True     # CRITICAL: Allows bot to see voice channel joins/leaves
+intents.message_content = True
+intents.members = True
+intents.voice_states = True
 
-# 3. INITIALIZATION: Create the bot instance
-# We set a dummy prefix '!' because we plan to use modern Slash (/) commands later
+COGS = [
+    "cogs.general",
+    "cogs.members",
+    "cogs.messages",
+    "cogs.voice",
+]
+
 class SuperBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
 
-    # The 'setup_hook' runs once when the bot starts up.
-    # It is the best place to sync our slash commands to Discord.
     async def setup_hook(self):
+        self.pool = await create_pool()
+        logger.info("✅ Database pool created.")
+
+        for cog in COGS:
+            await self.load_extension(cog)
+            logger.info(f"🔌 Loaded cog: {cog}")
+
         try:
             synced = await self.tree.sync()
-            logger.info(f"🔄 Synced {len(synced)} slash command(s) to Discord.")
+            logger.info(f"🔄 Synced {len(synced)} slash command(s).")
         except Exception as e:
             logger.error(f"❌ Failed to sync commands: {e}")
 
-# Instantiate our custom bot
+    async def close(self):
+        await close_pool()
+        logger.info("🔌 Database pool closed.")
+        await super().close()
+
 bot = SuperBot()
 
-# 4. EVENTS: What the bot does when it successfully connects
 @bot.event
 async def on_ready():
     logger.info("----------------------------------------")
@@ -51,31 +64,36 @@ async def on_ready():
     logger.info(f"🤖 Name: {bot.user.name}")
     logger.info(f"🆔 ID: {bot.user.id}")
     logger.info("----------------------------------------")
-@bot.event
-async def on_member_join(member):
-    await member.send(f"Hello Human, I'm your cutie piggy sniffy hedgehog MAEEEEEEEEEEEE, {member.mention}!")
 
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return  # Ignore messages from the bot itself
+    # Upsert every guild and member the bot can already see on startup
+    for guild in bot.guilds:
+        await upsert_guild(bot.pool, guild.id, guild.name)
+        async for member in guild.fetch_members():
+            if not member.bot:
+                await upsert_user(bot.pool, member.id, member.name, member.display_name)
+                await upsert_guild_member(bot.pool, guild.id, member.id, member.joined_at, member.nick)
+        logger.info(f"📋 Synced guild: {guild.name}")
 
-    if "shit" in message.content.lower():
-        await message.delete()  # Deletes the offending message
-        await message.channel.send(f"{message.author.mention}! Don't say that! MAEEEEEEEEEEEE!")
-    
-    await bot.process_commands(message)  # Ensure commands still work
+async def health_check(request):
+    return web.Response(text="OK")
 
-# Command section
-# !hello
-@bot.command()
-async def hello(ctx):
-    
-    await ctx.send(f"Hello {ctx.author.mention}!")
+async def run_health_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health server running on port {port}")
 
-# 5. EXECUTION: Start the bot using the token
-if __name__ == '__main__':
+async def main():
     if TOKEN is None:
-        logging.info("❌ Error: DISCORD_TOKEN not found. Check your .env file!")
-    else:
-        bot.run(TOKEN,log_handler=handler, log_level=logging.DEBUG)
+        logger.error("❌ DISCORD_TOKEN not found. Check your .env file!")
+        return
+    await run_health_server()
+    async with bot:
+        await bot.start(TOKEN)
+
+if __name__ == '__main__':
+    asyncio.run(main())
